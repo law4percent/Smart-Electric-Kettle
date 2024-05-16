@@ -310,6 +310,10 @@ const char body_activeContainer_E[] = R"---(
         </tr>
       </tbody>          
     </table>
+  
+)---";
+
+const char body_activeContainer_F[] = R"---(
   </div>
 )---";
 
@@ -401,7 +405,7 @@ const char successMessage[] = R"---(
 <body>
     <div class="success-container">
         <h1>Submission has been successful!</h1>
-        <a href="http://192.168.1.20/" onclick="history.back()">Go back</a>
+        <a href="http://192.168.1.25/" onclick="history.back()">Go back</a>
     </div>
 </body>
 </html>
@@ -454,7 +458,52 @@ const char errorMessageA[] = R"---(
 )---";
 
 const char errorMessageC[] = R"---(
-      <a href="http://192.168.1.20/" onclick="history.back()">Go back</a>
+      <a href="http://192.168.1.25/" onclick="history.back()">Go back</a>
+    </div>
+</body>
+</html>
+)---";
+
+const char cancellationSuccessMessage[] = R"---(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Success</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            text-align: center;
+            padding-top: 50px;
+        }
+        .success-container {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #007bff;
+            margin-bottom: 20px;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        a:hover {
+            color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="success-container">
+        <h1>Has been successfully cancelled!</h1>
+        <a href="http://192.168.1.25/" onclick="history.back()">Go back</a>
     </div>
 </body>
 </html>
