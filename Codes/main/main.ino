@@ -1,24 +1,20 @@
+#define Serial_Debug
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
 #include <RTClib.h>
+#include <TM1637Display.h>
+
+IPAddress staticIP(192, 168, 1, 25);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
 
 #include "MyWebApp.h"
 
 RTC_DS3231 rtc;
 
-// char daysOfWeek[7][12] = {
-//   "Sunday",
-//   "Monday",
-//   "Tuesday",
-//   "Wednesday",
-//   "Thursday",
-//   "Friday",
-//   "Saturday"
-// };
-
-const char *ssid = "Lenlen 2.4G";
-const char *password = "PLDTWIFI@Lenlen2023";
+const char *ssid = "Hello World";
+const char *password = "123456789";
 
 WebServer server(80);
 
@@ -29,27 +25,49 @@ int getEndMinute = 0;
 String getStartMeridiem = "--";
 String getEndMeridiem = "--";
 String getAlarmDate = "--/--/--";
-
-// Pin Used
-const byte LedIndicator = 2;
-const byte Relay = 13;
-
 bool RTCnotFound = false;
 bool StartBoiling = false;
 bool inProcessAlarm = false;
 
+unsigned long startTime = 0;
+
+// Pin Used
+const byte LedIndicator = 2;
+const byte buzzer = 12;
+const byte ClockPin = 27;
+const byte DataPin = 14;
+const byte Relay = 13;
+
+int getRemainingMins = 0;
+bool TimeFire = false;
+int prevMin = 0;
+bool firstCheck = true;
+String nowDate;
+String nowTime;
+
+TM1637Display display(ClockPin, DataPin);
+
 void setup() {
   Serial.begin(115200);
 
+  uint8_t data[] = { 0xff, 0xff, 0xff, 0xff };
+  display.setBrightness(0x0c);
+  display.setSegments(data);
+
   pinMode(Relay, OUTPUT);
   pinMode(LedIndicator, OUTPUT);
+  pinMode(buzzer, OUTPUT);
 
   digitalWrite(Relay, 0);
+  Buzzer(1);
+  delay(1000);
+  Buzzer(0);
 
   Serial.printf("Connecting to %s\n", ssid);
+  WiFi.config(staticIP, gateway, subnet);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(1000);
     Serial.print(".");
   }
 
@@ -71,6 +89,8 @@ void setup() {
       ;
   }
   digitalWrite(LedIndicator, 0);
+  display.setBrightness(0);  // Turn off
+  display.clear();
 }
 
 void loop() {
@@ -85,6 +105,11 @@ void loop() {
   int nowMinute = now.minute();
   int nowSecond = now.second();
   String nowMeridiem;
+  bool DayAlarm = false;
+
+  if (nowDate.equals(getAlarmDate)) {
+    DayAlarm = true;
+  }
 
   if (nowHour >= 12) {
     nowHour = nowHour - 12;
@@ -96,28 +121,73 @@ void loop() {
     nowMeridiem = "AM";
   }
 
+  nowDate = intDateConvertToString(nowYear, nowMonth, nowDay);
+  nowTime = intTimeConvertToString(nowHour, nowMinute, nowMeridiem);
+
+  if (DayAlarm and
+      getStartHour == nowHour and
+      getStartMinute == nowMinute and
+      !(strcmp(getStartMeridiem.c_str(), nowMeridiem.c_str())) and
+      !TimeFire) {
+    StartBoiling = true;
+    Buzzer(1);
+    startTime = millis();
+    TimeFire = true;
+    DisplayTime(getRemainingMins - 1, (59 - nowSecond));
+  }
+
+  if (DayAlarm and
+      StartBoiling and 
+      getEndHour == nowHour and
+      getEndMinute == nowMinute and
+      !(strcmp(getEndMeridiem.c_str(), nowMeridiem.c_str())) and
+    TimeFire) {
+    ResetData();
+    Buzzer(1);
+    startTime = millis();
+    delay(3000);
+  }
+
+  if (getRemainingMins >= 0 and TimeFire) {
+    int nowSEC = (59 - nowSecond);
+    int currMin = nowMinute;
+
+    if (firstCheck) {
+      firstCheck = false;
+      prevMin = currMin;
+    } else {
+      if (getRemainingMins > 0 && currMin != prevMin) {
+        getRemainingMins--;
+        prevMin = currMin;
+      }
+    }
+    display.setBrightness(7);  // Turn on
+    DisplayTime(getRemainingMins, nowSEC);
+  }
+
+  if (startTime != 0 && millis() - startTime >= 1000) {
+    startTime = 0;
+    Buzzer(0);
+  }
+
   // Print all data
-  Serial.printf("Current Date: %d/%d/%d\n"
+#ifdef Serial_Debug
+  Serial.printf("Current Date: %s\n"
                 "Current Time: %d:%d:%d %s\n\n",
-                nowMonth, nowDay, nowYear, nowHour, nowMinute, nowSecond, nowMeridiem);
+                nowDate, nowHour, nowMinute, nowSecond, nowMeridiem);
 
   Serial.printf("Alarm Date: %s\n"
                 "Start Time: %d:%d %s\n"
-                "End Time: %d:%d %s\n\n",
-                getAlarmDate, getStartHour, getStartMinute, getStartMeridiem, getEndHour, getEndMinute, getEndMeridiem);
-
-  if ((getStartHour == nowHour) and (getStartMinute == nowMinute) and !(strcmp(getStartMeridiem.c_str(), nowMeridiem.c_str()))) {
-    StartBoiling = true;
-  }
-
-  if (StartBoiling and (getEndHour == nowHour) and (getEndMinute == nowMinute) and !(strcmp(getEndMeridiem.c_str(), nowMeridiem.c_str()))) {
-    ResetData();
-  }
-
-  digitalWrite(Relay, StartBoiling);
+                "End Time: %d:%d %s\n"
+                "Minutes Duration: %d:%d\n\n",
+                getAlarmDate, getStartHour, getStartMinute, getStartMeridiem, getEndHour, getEndMinute, getEndMeridiem, getRemainingMins,
+                (TimeFire) ? (59 - nowSecond) : 59);
   Serial.printf("Boiling: %d\n\n", StartBoiling);
   Serial.println(F("---------------------------------------"));
-  delay(5000);
+#endif
+
+  digitalWrite(Relay, StartBoiling);
+  delay(500);
 }
 
 void handleRoot() {
@@ -126,7 +196,7 @@ void handleRoot() {
         <h3>RTC module not found!</h3>
         <p>Try to check the components or restart the system.</p>
     )---";
-    
+
     String errorMsg = "";
     errorMsg += errorMessageA;
     errorMsg += errorMessageB;
@@ -177,6 +247,11 @@ void handleRoot() {
     }
 
     homePage += body_activeContainer_E;
+    homePage += "RTC: ";
+    homePage += nowDate;
+    homePage += " ";
+    homePage += nowTime;
+    homePage += body_activeContainer_F;
     homePage += body_script_F;
 
     server.send(200, "text/html", homePage);
@@ -206,57 +281,58 @@ void handleSubmit() {
 
   bool saveNewData;
 
-  if (init_getStartHour == init_getEndHour and init_getStartMinute == init_getEndMinute and (strcmp(init_getStartMeridiem.c_str(), init_getEndMeridiem.c_str())) == 0) {
+  if (init_getStartHour == init_getEndHour and init_getStartMinute == init_getEndMinute and !(strcmp(init_getStartMeridiem.c_str(), init_getEndMeridiem.c_str()))) {
     const char errorMessageB[] = R"---(
         <h3>Time must not the same!</h3>
         <p>Your input start time and end time are the same value.</p>
     )---";
-    
+
     String errorMsg = "";
     errorMsg += errorMessageA;
     errorMsg += errorMessageB;
     errorMsg += errorMessageC;
-    
-    server.send(200, "text/html", errorMsg); // must not same value
+
+    server.send(200, "text/html", errorMsg);  // must not same value
     saveNewData = false;
-  } else if (init_getStartHour > init_getEndHour and (strcmp(init_getStartMeridiem.c_str(), init_getEndMeridiem.c_str())) == 0) {
+  } else if (init_getStartHour > init_getEndHour && !(strcmp(init_getStartMeridiem.c_str(), init_getEndMeridiem.c_str()))
+             && init_getStartHour != 12 && init_getEndHour != 1) {
     const char errorMessageB[] = R"---(
         <h3>Start time is before end time!</h3>
         <p>Start hour must not before end hour.</p>
     )---";
-    
+
     String errorMsg = "";
     errorMsg += errorMessageA;
     errorMsg += errorMessageB;
     errorMsg += errorMessageC;
-    
-    server.send(200, "text/html", errorMsg); // start hour must not before end hour
+
+    server.send(200, "text/html", errorMsg);  // start hour must not before end hour
     saveNewData = false;
   } else if (init_getStartHour == init_getEndHour and init_getStartMinute > init_getEndMinute and (strcmp(init_getStartMeridiem.c_str(), init_getEndMeridiem.c_str())) == 0) {
     const char errorMessageB[] = R"---(
         <h3>Start time is before end time!</h3>
         <p>Start minute must not before end minute.</p>
     )---";
-    
+
     String errorMsg = "";
     errorMsg += errorMessageA;
     errorMsg += errorMessageB;
     errorMsg += errorMessageC;
-    
-    server.send(200, "text/html", errorMsg); // start minute must not before end minute
+
+    server.send(200, "text/html", errorMsg);  // start minute must not before end minute
     saveNewData = false;
   } else if (!CalculateTimeDuration(init_getStartHour, init_getStartMinute, init_getStartMeridiem, init_getEndHour, init_getEndMinute, init_getEndMeridiem)) {
     const char errorMessageB[] = R"---(
         <h3>Time input is more than hour!</h3>
         <p>Time input must not more than one hour.</p>
     )---";
-    
+
     String errorMsg = "";
     errorMsg += errorMessageA;
     errorMsg += errorMessageB;
     errorMsg += errorMessageC;
-    
-    server.send(200, "text/html", errorMsg); // must not more than one hour
+
+    server.send(200, "text/html", errorMsg);  // must not more than one hour
     saveNewData = false;
   } else {
     server.send(200, "text/html", successMessage);
@@ -273,57 +349,15 @@ void handleSubmit() {
     getEndHour = endHour.toInt();
     getEndMinute = endMinute.toInt();
     getEndMeridiem = ToUpperCase(eMeridiem);
+    StartBoiling = false;
+    firstCheck = true;
   }
 }
 
 void handleCancel() {
   ResetData();
-  String homePage = "";
-  homePage += head_CSSstyle;
-  homePage += body_form_layout_A;
-  homePage += body_activeContainer_B;
-  homePage += body_activeContainer_C;
 
-  homePage += "<td>";
-  homePage += getAlarmDate;
-  homePage += "</td>";
-
-  homePage += "<td>";
-  homePage += String(getStartHour);
-  homePage += ":";
-  if (getStartMinute < 10) {
-    homePage += "0";
-    homePage += String(getStartMinute);
-  } else {
-    homePage += String(getStartMinute);
-  }
-  homePage += " ";
-  homePage += getStartMeridiem;
-  homePage += "</td>";
-
-  homePage += "<td>";
-  homePage += String(getEndHour);
-  homePage += ":";
-  if (getEndMinute < 10) {
-    homePage += "0";
-    homePage += String(getEndMinute);
-  } else {
-    homePage += String(getEndMinute);
-  }
-  homePage += " ";
-  homePage += getEndMeridiem;
-  homePage += "</td>";
-
-  if (inProcessAlarm) {
-    homePage += body_activeContainer_D_a;
-  } else {
-    homePage += body_activeContainer_D_b;
-  }
-
-  homePage += body_activeContainer_E;
-  homePage += body_script_F;
-
-  server.send(200, "text/html", homePage);
+  server.send(200, "text/html", cancellationSuccessMessage);
 }
 
 void ResetData() {
@@ -339,22 +373,48 @@ void ResetData() {
   getEndHour = 0;
   getEndMinute = 0;
   getEndMeridiem = "--";
+
+  TimeFire = false;
+  getRemainingMins = 0;
+  prevMin = 0;
+  display.setBrightness(0);  // Turn off
+  display.clear();
+  firstCheck = true;
 }
 
 bool CalculateTimeDuration(int sHour, int sMin, String sMeridiem, int eHour, int eMin, String eMeridiem) {
-  int hourDiff = eHour - sHour;
-  int minDiff = eMin - sMin;
+  int sHr_24format = convertTo24Hours(sHour, sMeridiem);
+  int eHr_24format = convertTo24Hours(eHour, eMeridiem);
+  int Hr = eHr_24format - sHr_24format;  // hour format
+  int Min = eMin - sMin;
 
-  // Adjust for AM/PM difference
-  if ((strcmp(sMeridiem.c_str(), eMeridiem.c_str())) != 0) {
-    hourDiff += 12;
+  if (eHr_24format == 0 && sHr_24format == 23) {
+    Hr = 24 - sHr_24format;
   }
 
-  if (hourDiff > 1 || (hourDiff == 1 && minDiff > 0)) {
+  if (Hr == 1 and Min < 0) {
+    Min = Min + 60;
+  } else if ((Hr == 1 && Min != 0) || (Hr > 1 || Hr < 0) || (Hr == 1 && Min > 0)) {
     return false;
-  } else {
-    return true;
   }
+
+#ifdef Serial_Debug
+  Serial.print(F("sHr_24format: "));
+  Serial.println(sHr_24format);
+  Serial.print(F("eHr_24format: "));
+  Serial.println(eHr_24format);
+  Serial.print(F("Min: "));
+  Serial.println(Min);
+#endif
+
+  if (Hr == 1 && Min == 0) {
+    getRemainingMins = (Min + 60) - 1;
+  } else if (Hr == 0) {
+    getRemainingMins = Min - 1;
+  } else {
+    getRemainingMins = Min - 1;
+  }
+  return true;
 }
 
 String ToUpperCase(String rawData) {
@@ -369,4 +429,59 @@ String ToUpperCase(String rawData) {
   }
 
   return lowerStr;
+}
+
+void Buzzer(const bool state) {
+  if (state) {
+    tone(buzzer, 3000);
+  } else {
+    noTone(buzzer);
+  }
+}
+
+void DisplayTime(const int mins, const int secs) {
+  display.showNumberDecEx(mins, 0b01000000, true, 2, 0);
+  display.showNumberDecEx(secs, 0, true, 2, 2);
+}
+
+int convertTo24Hours(int Hour, String Meridiem) {
+  if (Hour == 12 && !(strcmp(Meridiem.c_str(), "AM"))) {
+    return 0;
+  } else if (Hour <= 11 && !(strcmp(Meridiem.c_str(), "AM"))) {
+    return Hour;
+  } else if (Hour == 12 && !(strcmp(Meridiem.c_str(), "PM"))) {
+    return Hour;
+  } else if (Hour <= 11 && !(strcmp(Meridiem.c_str(), "PM"))) {
+    return Hour + 12;
+  }
+}
+
+String intDateConvertToString(int year, int month, int day) {
+  String CurrentDate = "";
+
+  CurrentDate += String(year);
+  CurrentDate += "-";
+
+  if (month < 10) {
+    CurrentDate += "0";
+  }
+  CurrentDate += String(month);
+  CurrentDate += "-";
+
+  if (day < 10) {
+    CurrentDate += "0";
+  }
+  CurrentDate += String(day);
+  return CurrentDate;
+}
+
+String intTimeConvertToString(int hour, int min, String meridiem) {
+  String CurrentTime = "";
+  
+  CurrentTime += String(hour);
+  CurrentTime += ":";
+  CurrentTime += String(min);
+  CurrentTime += " ";
+  CurrentTime += meridiem;
+  return CurrentTime;
 }
